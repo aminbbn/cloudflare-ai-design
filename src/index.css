@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+@import "tailwindcss";
+
+/* Define smooth scroll behavior and generic styling elements */
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+/* Custom scrollbar configurations for premium high-density feeling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Elegant selection colors based on Cloudflare Orange */
+::selection {
+  background-color: rgba(243, 128, 32, 0.3);
+  color: inherit;
+}
+
+/* Base fade-in entry animation for bento panels and chat bubbles */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Shimmer animation for loading states matching Cloudflare DNS waves */
+@keyframes cloudflareShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.cloud-shimmer {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: cloudflareShimmer 1.5s infinite;
+}
+
+/* Glowing ambient keyframe for central orb mimicking active cloud proxy */
+@keyframes heartbeatPulse {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    filter: brightness(1) drop-shadow(0 0 15px var(--accent-alpha, rgba(243, 128, 32, 0.4)));
+  }
+  50% {
+    transform: scale(1.06) rotate(3deg);
+    filter: brightness(1.2) drop-shadow(0 0 25px var(--accent-alpha, rgba(243, 128, 32, 0.6)));
+  }
+}
+
+.orb-glow {
+  animation: heartbeatPulse 8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

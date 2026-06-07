@@ -1,0 +1,6 @@
+{
+  "name": "Cloudflare AI",
+  "description": "A high-performance AI Chatting experience inspired by Cloudflare's sleek telemetry, offering customizable system prompts, modular background effects, saved appearance presets, and workspace sorting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
