@@ -920,6 +920,21 @@ export default function App() {
     setShowNewProjInput(false);
   };
 
+  const handleDeleteProject = (projectId: string) => {
+    if (window.confirm("Delete this workspace project? Chats tagged with it will remain intact but untagged.")) {
+      setProjects(prev => prev.filter(p => p.id !== projectId));
+      setChats(prev => prev.map(c => {
+        if (c.projectId === projectId) {
+          return { ...c, projectId: null };
+        }
+        return c;
+      }));
+      if (selectedProjectId === projectId) {
+        setSelectedProjectId(null);
+      }
+    }
+  };
+
   // --- Global Telemetry Actions ---
   const handleLoginSuccess = (cfAccount: CloudflareAccount) => {
     setAccount(cfAccount);
@@ -1412,57 +1427,99 @@ export default function App() {
               </span>
               <button 
                 onClick={() => setShowNewProjInput(!showNewProjInput)}
-                className="text-zinc-400 hover:text-orange-500 cursor-pointer"
+                className="text-zinc-400 hover:text-orange-500 cursor-pointer p-1 rounded-md hover:bg-white/5 transition-all"
                 title="Create Workspace Project"
               >
                 <FolderPlus size={15} />
               </button>
             </div>
 
-            {/* Custom project creator */}
-            {showNewProjInput && (
-              <form onSubmit={handleCreateProject} className={`p-2.5 rounded-xl border mb-3 space-y-2 ${
-                themeSettings.mode === "light"
-                  ? "bg-zinc-50 border-zinc-200"
-                  : "bg-zinc-950 border-white/5"
-              }`}>
-                <input
-                  type="text"
-                  required
-                  placeholder="Project name..."
-                  value={newProjName}
-                  onChange={(e) => setNewProjName(e.target.value)}
-                  className={`w-full px-2 py-1.5 rounded-lg text-xs font-sans focus:outline-none focus:border-orange-500 ${
+            {/* Custom project creator with beautiful spring animation */}
+            <AnimatePresence>
+              {showNewProjInput && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, height: "auto", scale: 1 }}
+                  exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+                  className="overflow-hidden"
+                >
+                  <form onSubmit={handleCreateProject} className={`p-3 rounded-2xl border mb-3 space-y-2.5 ${
                     themeSettings.mode === "light"
-                      ? "bg-white border border-zinc-200 text-zinc-800 placeholder-zinc-400"
-                      : "bg-[#0e1014] border border-white/5 text-white placeholder-zinc-650"
-                  }`}
-                />
-                <div className="flex items-center justify-between">
-                  <div className="flex gap-1.5">
-                    {["#F38020", "#FFFFFF", "#FDBA74", "#71717A", "#27272A", "#D4D4D8"].map(c => (
-                      <button
-                        type="button"
-                        key={c}
-                        onClick={() => setNewProjColor(c)}
-                        className={`w-3.5 h-3.5 rounded-full border border-black/20 ${newProjColor === c ? "ring-1 ring-white" : ""}`}
-                        style={{ backgroundColor: c }}
-                      />
-                    ))}
-                  </div>
-                  <button type="submit" className={`p-1 rounded text-[10px] font-bold ${
-                    themeSettings.mode === "light"
-                      ? "bg-orange-500 text-white hover:bg-orange-600 cursor-pointer"
-                      : "bg-white text-black hover:bg-zinc-100 cursor-pointer"
+                      ? "bg-zinc-50 border-zinc-200 shadow-sm"
+                      : "bg-[#0d0e12] border-white/5 shadow-inner"
                   }`}>
-                    Add
-                  </button>
-                </div>
-              </form>
-            )}
+                    <input
+                      type="text"
+                      required
+                      placeholder="Project Name..."
+                      value={newProjName}
+                      onChange={(e) => setNewProjName(e.target.value)}
+                      className={`w-full px-2.5 py-1.5 rounded-xl text-xs font-sans focus:outline-none focus:ring-1 focus:ring-orange-500/30 transition-all ${
+                        themeSettings.mode === "light"
+                          ? "bg-white border border-zinc-200 text-zinc-800 placeholder-zinc-400 focus:border-orange-500"
+                          : "bg-[#0e1014] border border-white/5 text-white placeholder-zinc-650 focus:border-orange-500/40"
+                      }`}
+                    />
+                    <div className="flex flex-col gap-2.5">
+                      {/* Premium curated color collection */}
+                      <div className="flex justify-between items-center bg-black/10 dark:bg-black/25 p-1.5 rounded-xl">
+                        <span className="text-[9px] text-zinc-500 uppercase tracking-wider font-mono font-bold pl-1">Theme Dot</span>
+                        <div className="flex gap-1.5">
+                          {["#F38020", "#10B981", "#3B82F6", "#EF4444", "#8B5CF6", "#F1F5F9"].map(c => {
+                            const isSelected = newProjColor === c;
+                            return (
+                              <button
+                                type="button"
+                                key={c}
+                                onClick={() => setNewProjColor(c)}
+                                className={`w-4 h-4 rounded-full border border-black/15 transition-transform hover:scale-110 relative ${
+                                  isSelected ? "scale-110 ring-2 ring-orange-500/40" : ""
+                                }`}
+                                style={{ backgroundColor: c }}
+                              >
+                                {isSelected && (
+                                  <span className="absolute inset-0 flex items-center justify-center">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-black/60 dark:bg-white" />
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            setNewProjName("");
+                            setShowNewProjInput(false);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                            themeSettings.mode === "light"
+                              ? "hover:bg-zinc-200 text-zinc-600"
+                              : "hover:bg-white/5 text-zinc-450"
+                          }`}
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit" 
+                          className={`px-3 py-1 rounded-xl text-[10px] font-bold shadow-md cursor-pointer transition-transform active:scale-95`}
+                          style={{ backgroundColor: themeSettings.accentColor, color: "#111" }}
+                        >
+                          Add Project
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* List of Projects */}
-            <div className="space-y-0.5 max-h-[140px] overflow-y-auto pr-1">
+            <div className="space-y-0.5 max-h-[160px] overflow-y-auto pr-1">
               <button
                 onClick={() => {
                   setSelectedProjectId(null);
@@ -1487,26 +1544,48 @@ export default function App() {
                 const count = chats.filter(c => c.projectId === p.id && !c.isArchived).length;
                 const isSelected = selectedProjectId === p.id;
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => {
-                      setSelectedProjectId(p.id);
-                      setWorkspaceMode("chat");
-                    }}
-                    className={`w-full py-2 px-2.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition-colors whitespace-nowrap cursor-pointer ${
+                    className={`group relative flex items-center justify-between w-full h-8 rounded-lg transition-colors overflow-hidden ${
                       isSelected
                         ? themeSettings.mode === "light"
-                          ? "bg-orange-500/10 text-zinc-900 font-bold"
-                          : "bg-zinc-950/40 text-white font-bold"
+                          ? "bg-orange-500/10 text-zinc-900"
+                          : "bg-zinc-950/40 text-white"
                         : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
                     }`}
                   >
-                    <span className="flex items-center gap-2 max-w-[80%] truncate">
-                      <span className="w-2.5 h-2.5 rounded-full block border border-black/45 flex-shrink-0" style={{ backgroundColor: p.color }} />
-                      <span className="truncate">{p.title}</span>
-                    </span>
-                    <span className="text-[10px] font-mono text-zinc-500">({count})</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        setSelectedProjectId(p.id);
+                        setWorkspaceMode("chat");
+                      }}
+                      className="flex-1 py-1 px-2.5 text-left text-xs font-semibold flex items-center gap-2 min-w-0 cursor-pointer h-full whitespace-nowrap"
+                    >
+                      <span className="w-2 h-2 rounded-full block border border-black/25 flex-shrink-0" style={{ backgroundColor: p.color }} />
+                      <span className="truncate pr-1">{p.title}</span>
+                    </button>
+                    
+                    <div className="flex items-center gap-1.5 pr-2.5 flex-shrink-0 select-none">
+                      {/* Count Badge that disappears on hover */}
+                      <span className="text-[10px] font-mono text-zinc-500 group-hover:opacity-0 group-hover:scale-95 transition-all duration-150">
+                        ({count})
+                      </span>
+                      
+                      {/* Absolutely positioned Delete button on hover */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          handleDeleteProject(p.id);
+                        }}
+                        className="absolute right-1.5 opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 transition-all duration-150 flex items-center justify-center p-1 rounded-md hover:bg-red-500/15 text-zinc-400 hover:text-red-500 cursor-pointer"
+                        title={`Delete project "${p.title}"`}
+                      >
+                        <Trash size={12} />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -2569,8 +2648,8 @@ export default function App() {
           usageStats={stats}
           systemPrompts={systemPrompts}
           activeSystemPromptId={activePromptId}
-          accentColor={themeSettings.accentColor}
-          mode={themeSettings.mode}
+          themeSettings={themeSettings}
+          onSaveThemeSettings={setThemeSettings}
           onDisconnect={handleDisconnect}
           onSaveSystemPrompts={handleSaveSystemPrompts}
           onExportChats={handleExportChats}
