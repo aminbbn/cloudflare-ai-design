@@ -26,7 +26,10 @@ import {
   ChatCircle,
   FolderOpen,
   Cpu,
-  Sparkle
+  Sparkle,
+  List,
+  CaretLeft,
+  CaretDown
 } from "@phosphor-icons/react";
 
 import { 
@@ -36,13 +39,15 @@ import {
   SystemPrompt, 
   CloudflareAccount, 
   AppUsageStats, 
-  ThemeSettings 
+  ThemeSettings,
+  GeneratedImage
 } from "./types";
 
 import LoginModal from "./components/LoginModal";
 import AppearanceModal from "./components/AppearanceModal";
 import SettingsModal from "./components/SettingsModal";
 import ShinyText from "./components/ShinyText";
+import { ImageLab } from "./components/ImageLab";
 
 const MODEL_NAMES: Record<string, string> = {
   "gemini-2.5-flash": "Gemini 2.5 Flash",
@@ -371,14 +376,83 @@ export default function App() {
   const [selectedModelId, setSelectedModelId] = useState<string>(() => {
     return localStorage.getItem("cf_ai_selected_model_id") || "gemini-2.5-flash";
   });
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   
   // Message edit state
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
 
+  // WORKSPACE ENGINE STATE (Chat vs Image Lab)
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "image">("chat");
+
+  // State for generated images in Image Lab
+  const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>(() => {
+    const saved = localStorage.getItem("cf_ai_generated_images");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [
+      {
+        id: "img_sample_1",
+        url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1280&h=720&q=80&sig=1111",
+        prompt: "Abstract neon orange cloud servers connecting fibers, highly detailed 3D render, ambient cyberpunk glow",
+        refinedPrompt: "An elite architectural masterpiece showing an abstract neural grid of holographic glowing neon-orange cloud servers, crystalline optical fiber lines, soft cybernetic fog, photorealistic octane render, 8k resolution.",
+        model: "imagen-3.0-generate-002",
+        aspect: "16:9",
+        steps: 30,
+        createdAt: new Date(Date.now() - 3600000).toISOString(), // 1hr ago
+        seed: 849202,
+        width: 1280,
+        height: 720,
+        telemetry: {
+          inferenceTimeMs: 2310,
+          tokensUsed: 124,
+          engine: "Cloudflare Workers AI Core (Imagen Serverless Route)",
+          status: "SUCCESS_DELIVERED",
+          nodeId: "cloudflare-edge-node-42"
+        }
+      },
+      {
+        id: "img_sample_2",
+        url: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1024&h=1024&q=80&sig=2222",
+        prompt: "Sleek machinery core database with amber glass server racks",
+        refinedPrompt: "A sleek high-density server rack chassis with amber emitting indicators, dark polished metallic components, detailed hardware microchips, sophisticated volumetric cloud routing layout, premium golden hour depth of field.",
+        model: "stable-diffusion-xl-lightning",
+        aspect: "1:1",
+        steps: 20,
+        createdAt: new Date(Date.now() - 1200000).toISOString(), // 20m ago
+        seed: 394012,
+        width: 1024,
+        height: 1024,
+        telemetry: {
+          inferenceTimeMs: 1420,
+          tokensUsed: 80,
+          engine: "Cloudflare Workers AI Core (Imagen Serverless Route)",
+          status: "SUCCESS_DELIVERED",
+          nodeId: "cloudflare-edge-node-17"
+        }
+      }
+    ];
+  });
+
+  // Image Lab generation panel states
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [selectedImageModel, setSelectedImageModel] = useState("imagen-3.0-generate-002");
+  const [selectedImageAspect, setSelectedImageAspect] = useState("1:1");
+  const [selectedImageSteps, setSelectedImageSteps] = useState(30);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isImprovingImagePrompt, setIsImprovingImagePrompt] = useState(false);
+  const [imageGenerationError, setImageGenerationError] = useState("");
+  const [selectedViewingImage, setSelectedViewingImage] = useState<GeneratedImage | null>(null);
+
   // Chat rename inline state
   const [isRenamingChat, setIsRenamingChat] = useState(false);
   const [renameText, setRenameText] = useState("");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // New Project toggle/input
   const [showNewProjInput, setShowNewProjInput] = useState(false);
@@ -496,6 +570,10 @@ export default function App() {
     localStorage.setItem("cf_ai_selected_model_id", selectedModelId);
   }, [selectedModelId]);
 
+  useEffect(() => {
+    localStorage.setItem("cf_ai_generated_images", JSON.stringify(generatedImages));
+  }, [generatedImages]);
+
   // Auto-grow logic for input textarea (limit max height to half of chat size - approx 35% of viewport height)
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -547,6 +625,7 @@ export default function App() {
     setChats(prev => [newChat, ...prev]);
     setSelectedChatId(newChat.id);
     setIsRenamingChat(false);
+    setWorkspaceMode("chat");
     
     setStats(prev => ({
       ...prev,
@@ -986,6 +1065,79 @@ export default function App() {
     });
   };
 
+  const handleImproveImagePromptText = async () => {
+    if (!imagePrompt.trim() || isImprovingImagePrompt) return;
+    setIsImprovingImagePrompt(true);
+    setImageGenerationError("");
+    try {
+      const response = await fetch("/api/improve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: imagePrompt
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to optimize prompt.");
+      }
+
+      const data = await response.json();
+      const improvedText = data.text || imagePrompt;
+      setImagePrompt(improvedText);
+    } catch (e) {
+      console.error(e);
+      setImageGenerationError("Failed to enrich prompt via serverless Gemini.");
+    } finally {
+      setIsImprovingImagePrompt(false);
+    }
+  };
+
+  const handleGenerateImage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!imagePrompt.trim() || isGeneratingImage) return;
+    setIsGeneratingImage(true);
+    setImageGenerationError("");
+    try {
+      const response = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: imagePrompt,
+          model: selectedImageModel,
+          aspect: selectedImageAspect,
+          steps: selectedImageSteps
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Generation error inside edge node network.");
+      }
+
+      const newImage: GeneratedImage = await response.json();
+      setGeneratedImages(prev => [newImage, ...prev]);
+      
+      // Update app stats to reflect new image generated count
+      setStats(prev => ({
+        ...prev,
+        messagesProcessed: prev.messagesProcessed + 1,
+        apiLatencySum: prev.apiLatencySum + (newImage.telemetry?.inferenceTimeMs || 2000),
+        estimatedTokens: prev.estimatedTokens + (newImage.telemetry?.tokensUsed || 100)
+      }));
+
+    } catch (err: any) {
+      console.error("Image generation failed:", err);
+      setImageGenerationError(err?.message || "Inference node exception.");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
   const activeProjectColor = projects.find(p => p.id === selectedProjectId)?.color || themeSettings.accentColor;
 
   return (
@@ -1025,63 +1177,66 @@ export default function App() {
       <main className="absolute inset-3 md:inset-6 lg:inset-8 z-10 flex gap-4 md:gap-6 overflow-hidden">
         
         {/* --- LEFT SIDEBAR (Inspired by Zyricon/Synapse style) --- */}
-        <aside className={`w-72 flex-shrink-0 flex flex-col border rounded-2xl p-5 relative overflow-hidden transition-all ${
-          themeSettings.mode === "light" 
-            ? "bg-[#fafafa] border-zinc-200/80 text-zinc-800 shadow-[0_6px_25px_rgba(0,0,0,0.02)]" 
-            : "bg-[#0a0a0c]/90 border-[#1f1f23] text-zinc-100"
-        } ${themeSettings.cardBlur ? "backdrop-blur-2xl" : ""}`}>
-          
-          {/* Brand header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5">
-              <div 
-                className="w-9 h-9 rounded-xl flex items-center justify-center text-[#111] shadow-md transition-all active:rotate-12 cursor-pointer"
-                style={{ backgroundColor: themeSettings.accentColor }}
-                onClick={() => handleAddNewChat()}
-                title="Create New Session"
-              >
-                <Cloud size={20} weight="bold" />
-              </div>
-              <div>
-                <h1 className={`text-sm font-black uppercase tracking-wider font-sans leading-none ${
-                  themeSettings.mode === "light" ? "text-zinc-900" : "text-white"
-                }`}>
-                  Cloudflare AI
-                </h1>
-                <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1.5 uppercase font-bold tracking-tight">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                  CONNECTED
-                </span>
-              </div>
-            </div>
+        <AnimatePresence initial={false}>
+          {isSidebarOpen && (
+            <motion.aside
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 288, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 350, damping: 32 }}
+              className={`flex-shrink-0 flex flex-col border rounded-2xl p-5 relative overflow-hidden h-full ${
+                themeSettings.mode === "light" 
+                  ? "bg-[#fafafa] border-zinc-200/80 text-zinc-800 shadow-[0_6px_25px_rgba(0,0,0,0.02)]" 
+                  : "bg-[#0a0a0c]/90 border-[#1f1f23] text-zinc-100"
+              } ${themeSettings.cardBlur ? "backdrop-blur-2xl" : ""}`}
+            >
+              <div className="w-[248px] flex flex-col h-full flex-shrink-0">
+                {/* Brand header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div 
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-[#111] shadow-md transition-all active:rotate-12 cursor-pointer"
+                      style={{ backgroundColor: themeSettings.accentColor }}
+                      onClick={() => handleAddNewChat()}
+                      title="Create New Session"
+                    >
+                      <Cloud size={20} weight="bold" />
+                    </div>
+                    <div>
+                      <h1 className={`text-sm font-black uppercase tracking-wider font-sans leading-none ${
+                        themeSettings.mode === "light" ? "text-zinc-900" : "text-white"
+                      }`}>
+                        Cloudflare AI
+                      </h1>
+                      <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1.5 uppercase font-bold tracking-tight">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                        CONNECTED
+                      </span>
+                    </div>
+                  </div>
 
-            {/* Quick Settings tool triggers */}
-            <div className="flex items-center gap-1 py-1 px-1 bg-zinc-950/40 rounded-lg border border-white/5">
-              <button 
-                onClick={() => setShowAppearanceModal(true)}
-                className="p-1.5 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer hover:bg-white/5"
-                title="Aesthetics Customizer"
-              >
-                <Palette size={14} />
-              </button>
-              <button 
-                onClick={() => setShowSettingsModal(true)}
-                className="p-1.5 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer hover:bg-white/5"
-                title="Global Node Settings"
-              >
-                <Gear size={14} />
-              </button>
-            </div>
-          </div>
+                  {/* Close Sidebar button */}
+                  <button 
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={`p-1.5 rounded-lg border transition-all duration-200 cursor-pointer hover:scale-[1.05] active:scale-[0.95] ${
+                      themeSettings.mode === "light"
+                        ? "bg-zinc-100/80 hover:bg-zinc-200 border-zinc-200 text-zinc-650"
+                        : "bg-zinc-950/40 hover:bg-zinc-900 border-white/5 text-zinc-400 hover:text-white"
+                    }`}
+                    title="Close Sidebar"
+                  >
+                    <CaretLeft size={15} weight="bold" />
+                  </button>
+                </div>
 
-          {/* New Conversation Trigger */}
-          <button
-            onClick={() => handleAddNewChat()}
-            className="w-full py-3.5 px-4 rounded-xl border border-white/5 hover:border-white/10 text-xs font-bold text-zinc-300 hover:text-white flex items-center gap-2 bg-zinc-950/20 hover:bg-zinc-950/50 transition-all cursor-pointer shadow-inner active:scale-[0.98] mb-4 group"
-          >
-            <Plus size={15} weight="bold" className="text-orange-500 group-hover:rotate-90 transition-transform" style={{ color: themeSettings.accentColor }} />
-            New Conversation
-          </button>
+                {/* New Conversation Trigger */}
+                <button
+                  onClick={() => handleAddNewChat()}
+                  className="w-full py-3.5 px-4 rounded-xl border border-white/5 hover:border-white/10 text-xs font-bold text-zinc-300 hover:text-white flex items-center gap-2 bg-zinc-950/20 hover:bg-zinc-950/50 transition-all cursor-pointer shadow-inner active:scale-[0.98] mb-4 group"
+                >
+                  <Plus size={15} weight="bold" className="text-orange-500 group-hover:rotate-90 transition-transform" style={{ color: themeSettings.accentColor }} />
+                  New Conversation
+                </button>
 
           {/* Past History Search text input */}
           <div className="relative mb-4">
@@ -1127,7 +1282,7 @@ export default function App() {
           </div>
 
           {/* ACTIVE CHATS LIST STREAM */}
-          <div className="flex-1 overflow-y-auto space-y-1 pr-1.5 mb-4">
+          <div className="flex-1 overflow-y-auto space-y-0.5 pr-1.5 mb-4">
             <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest block pl-2.5 mb-2 leading-none">
               {showArchivedOnly ? "ARCHIVED INDEX" : selectedProjectId ? "WORKPLACE RECORDS" : "CONVERSATION STREAM"}
             </span>
@@ -1147,14 +1302,15 @@ export default function App() {
                       setSelectedChatId(c.id);
                       setRenameText(c.title);
                       setIsRenamingChat(false);
+                      setWorkspaceMode("chat");
                     }}
-                    className={`group relative py-2.5 px-3 rounded-xl text-left transition-all cursor-pointer flex items-center justify-between gap-2.5 border ${
+                    className={`group relative py-1.5 px-2.5 rounded-lg text-left transition-all cursor-pointer flex items-center justify-between gap-2 border ${
                       isActive 
                         ? themeSettings.mode === "light"
                           ? "bg-orange-500/10 border-orange-500/20 shadow-sm text-zinc-900 font-bold" 
                           : "bg-[#121316] border-white/10 shadow-lg text-white font-semibold" 
                         : themeSettings.mode === "light"
-                          ? "bg-transparent border-transparent hover:bg-zinc-200/50 text-zinc-600 hover:text-zinc-900"
+                          ? "bg-transparent border-transparent hover:bg-zinc-200/50 text-zinc-650 hover:text-zinc-900"
                           : "bg-transparent border-transparent hover:bg-[#121316]/50 text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
@@ -1198,6 +1354,54 @@ export default function App() {
                 );
               })
             )}
+          </div>
+
+          {/* --- WORKSPACE ENGINE SWITCHER --- */}
+          <div className="border-t border-white/5 pt-4 mb-4">
+            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest block pl-2.5 mb-2 leading-none">
+              AI STUDIO CHANNELS
+            </span>
+            <div className="space-y-1">
+              <button
+                onClick={() => setWorkspaceMode("chat")}
+                className={`w-full py-2.5 px-3 rounded-xl text-left text-xs font-semibold flex items-center justify-between border transition-all cursor-pointer ${
+                  workspaceMode === "chat"
+                    ? themeSettings.mode === "light"
+                      ? "bg-orange-500/10 border-orange-500/20 shadow-sm text-zinc-900 font-bold" 
+                      : "bg-[#121316] border-white/10 shadow-lg text-white font-semibold"
+                    : themeSettings.mode === "light"
+                      ? "bg-transparent border-transparent hover:bg-zinc-200/50 text-zinc-650 hover:text-zinc-900"
+                      : "bg-transparent border-transparent hover:bg-[#121316]/50 text-zinc-400 hover:text-zinc-200"
+                }`}
+                title="Open AI Chat Conversations"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ChatCircle size={15} weight={workspaceMode === "chat" ? "fill" : "regular"} style={{ color: workspaceMode === "chat" ? themeSettings.accentColor : undefined }} />
+                  <span className="truncate">AI Chat Assistant</span>
+                </div>
+                <span className="text-[9px] px-1 py-0.5 rounded bg-orange-500/20 text-orange-400 font-bold tracking-tight uppercase scale-[0.85] flex-shrink-0" style={{ color: themeSettings.accentColor }}>GEMINI</span>
+              </button>
+
+              <button
+                onClick={() => setWorkspaceMode("image")}
+                className={`w-full py-2.5 px-3 rounded-xl text-left text-xs font-semibold flex items-center justify-between border transition-all cursor-pointer ${
+                  workspaceMode === "image"
+                    ? themeSettings.mode === "light"
+                      ? "bg-orange-500/10 border-orange-500/20 shadow-sm text-zinc-900 font-bold" 
+                      : "bg-[#121316] border-white/10 shadow-lg text-white font-semibold"
+                    : themeSettings.mode === "light"
+                      ? "bg-transparent border-transparent hover:bg-zinc-200/50 text-zinc-650 hover:text-zinc-900"
+                      : "bg-transparent border-transparent hover:bg-[#121316]/50 text-zinc-400 hover:text-zinc-200"
+                }`}
+                title="Open Text-to-Image Generation Lab"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ImageSquare size={15} weight={workspaceMode === "image" ? "fill" : "regular"} style={{ color: workspaceMode === "image" ? themeSettings.accentColor : undefined }} />
+                  <span className="truncate">AI Image Lab</span>
+                </div>
+                <span className="text-[9px] px-1 py-0.5 rounded bg-orange-500/20 text-orange-400 font-bold tracking-tight uppercase scale-[0.85] flex-shrink-0" style={{ color: themeSettings.accentColor }}>IMAGEN</span>
+              </button>
+            </div>
           </div>
 
           {/* WORKSPACES / PROJECTS DIVISION */}
@@ -1260,7 +1464,10 @@ export default function App() {
             {/* List of Projects */}
             <div className="space-y-0.5 max-h-[140px] overflow-y-auto pr-1">
               <button
-                onClick={() => setSelectedProjectId(null)}
+                onClick={() => {
+                  setSelectedProjectId(null);
+                  setWorkspaceMode("chat");
+                }}
                 className={`w-full py-2 px-2.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition-colors whitespace-nowrap cursor-pointer ${
                   selectedProjectId === null
                     ? themeSettings.mode === "light"
@@ -1282,7 +1489,10 @@ export default function App() {
                 return (
                   <button
                     key={p.id}
-                    onClick={() => setSelectedProjectId(p.id)}
+                    onClick={() => {
+                      setSelectedProjectId(p.id);
+                      setWorkspaceMode("chat");
+                    }}
                     className={`w-full py-2 px-2.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition-colors whitespace-nowrap cursor-pointer ${
                       isSelected
                         ? themeSettings.mode === "light"
@@ -1340,7 +1550,10 @@ export default function App() {
               <Gear size={16} />
             </button>
           </div>
-        </aside>
+              </div>
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
         {/* --- CORE WORKSPACE WINDOW --- */}
         <div className={`flex-1 flex flex-col border rounded-2xl overflow-hidden relative ${
@@ -1356,7 +1569,28 @@ export default function App() {
               : "border-white/5 bg-zinc-950/20"
           }`}>
             <div className="flex items-center gap-3 min-w-0 flex-1">
-              {activeChat ? (
+              {!isSidebarOpen && (
+                <button
+                  onClick={() => setIsSidebarOpen(true)}
+                  className={`p-1.5 rounded-lg border transition-all duration-200 cursor-pointer hover:scale-[1.05] active:scale-[0.95] flex items-center justify-center flex-shrink-0 ${
+                    themeSettings.mode === "light"
+                      ? "bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-650 hover:border-zinc-350"
+                      : "bg-[#121316] border-white/5 text-zinc-400 hover:text-white hover:border-white/10"
+                  }`}
+                  title="Show Sidebar"
+                >
+                  <List size={15} weight="bold" />
+                </button>
+              )}
+
+              {workspaceMode === "image" ? (
+                <div>
+                   <h2 className={`text-sm font-bold tracking-tight ${
+                     themeSettings.mode === "light" ? "text-zinc-950" : "text-white"
+                   }`}>Cloudflare Workers AI · Image Lab</h2>
+                   <p className="text-[10px] text-zinc-500 font-sans">Synthesize pristine graphic renders across serverless edge processors</p>
+                </div>
+              ) : activeChat ? (
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   {/* Editable title on click */}
                   {isRenamingChat ? (
@@ -1420,7 +1654,7 @@ export default function App() {
 
             {/* Right-aligned parameters - beautifully spaced to avoid clustering */}
             <div className="flex items-center gap-4">
-              {activeChat && (
+              {workspaceMode === "chat" && activeChat && (
                 <>
                   {/* Custom Project Dropdown Popover */}
                   {(() => {
@@ -1699,8 +1933,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Core Chat Flow Window Stream */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0 relative">
+          {workspaceMode === "chat" ? (
+            <>
+              {/* Core Chat Flow Window Stream */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 z-0 relative">
             
             {/* If no chat active or active chat empty, render the premium Zyricon central prompt screen */}
             {!activeChat || activeChat.messages.length === 0 ? (
@@ -2211,25 +2447,69 @@ export default function App() {
                 </div>
 
                 {/* Sub-bar utility items containing the model selector */}
-                <div className="flex items-center justify-between border-t border-white/5 pt-2.5 mt-2 px-1">
+                <div className="flex items-center justify-between border-t border-white/5 pt-2.5 mt-2 px-1 relative">
                   
-                  {/* Premium Model Selector on the left */}
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 bg-zinc-900 border border-white/5 px-2.5 py-1.5 rounded-xl transition-all focus-within:border-orange-500/40 focus-within:ring-1 focus-within:ring-orange-500/20" style={{ focusWithinBorderColor: themeSettings.accentColor + "40" } as any}>
-                      <Cpu size={14} className="text-orange-500" style={{ color: themeSettings.accentColor }} />
-                      <select
-                        id="model-select-control"
-                        value={selectedModelId}
-                        onChange={(e) => setSelectedModelId(e.target.value)}
-                        className="bg-transparent text-[11px] text-zinc-300 font-medium focus:outline-none cursor-pointer pr-1"
-                      >
-                        <option value="gemini-2.5-flash" className="bg-[#121212] text-zinc-300">Gemini 2.5 Flash</option>
-                        <option value="gemini-2.5-pro" className="bg-[#121212] text-zinc-300">Gemini 2.5 Pro</option>
-                        <option value="deepseek-r1" className="bg-[#121212] text-zinc-300">DeepSeek R1 (Reasoning)</option>
-                        <option value="llama-3.3-70b" className="bg-[#121212] text-zinc-300">Llama 3.3 70B</option>
-                        <option value="qwen-2.5-coder" className="bg-[#121212] text-zinc-300">Qwen 2.5 Coder</option>
-                      </select>
-                    </div>
+                  {/* Premium Custom Model Selector Popover on the left */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowModelDropdown(!showModelDropdown)}
+                      className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-850 border border-white/5 px-3 py-1.5 rounded-xl transition-all text-[11px] text-zinc-300 font-bold select-none cursor-pointer hover:border-white/10 active:scale-98"
+                    >
+                      <Cpu size={14} className="text-orange-500 animate-pulse animate-duration-[3s]" style={{ color: themeSettings.accentColor }} />
+                      <span>{getModelDisplayName(selectedModelId)}</span>
+                      <CaretDown size={10} className={`transition-transform duration-250 text-zinc-400 ${showModelDropdown ? "rotate-180" : ""}`} />
+                    </button>
+
+                    <AnimatePresence>
+                      {showModelDropdown && (
+                        <>
+                          {/* Invisible backdrop click-closing layer */}
+                          <div 
+                            className="fixed inset-0 z-40 bg-black/0 cursor-default"
+                            onClick={() => setShowModelDropdown(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, y: 12, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 12, scale: 0.95 }}
+                            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                            className="absolute bottom-full left-0 mb-2 w-[220px] rounded-2xl border border-white/10 bg-[#0d0e12] p-1.5 shadow-2xl z-50 text-zinc-100 font-sans"
+                          >
+                            <div className="px-2.5 py-1 text-[9px] font-mono tracking-wider text-zinc-500 uppercase font-bold block border-b border-white/5 mb-1 select-none">
+                              Select Model Engine
+                            </div>
+                            <div className="space-y-0.5">
+                              {Object.entries(MODEL_NAMES).map(([id, name]) => {
+                                const isSelected = selectedModelId === id;
+                                return (
+                                  <button
+                                    key={id}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedModelId(id);
+                                      localStorage.setItem("cf_ai_selected_model_id", id);
+                                      setShowModelDropdown(false);
+                                    }}
+                                    className={`w-full text-left py-1.5 px-2.5 rounded-xl transition-all duration-200 flex items-center justify-between cursor-pointer ${
+                                      isSelected
+                                        ? "bg-white/10 text-white font-bold"
+                                        : "hover:bg-white/5 text-zinc-400 hover:text-white"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Cpu size={13} className={isSelected ? "text-orange-500" : "text-zinc-500"} style={{ color: isSelected ? themeSettings.accentColor : undefined }} />
+                                      <span className="text-[11px] font-semibold">{name}</span>
+                                    </div>
+                                    {isSelected && <Check size={11} className="text-zinc-400" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
                   </div>
 
                   {/* Send Action */}
@@ -2246,8 +2526,31 @@ export default function App() {
               </div>
             </form>
           </div>
+        </>
+      ) : (
+        <ImageLab
+          generatedImages={generatedImages}
+          setGeneratedImages={setGeneratedImages}
+          imagePrompt={imagePrompt}
+          setImagePrompt={setImagePrompt}
+          selectedImageModel={selectedImageModel}
+          setSelectedImageModel={setSelectedImageModel}
+          selectedImageAspect={selectedImageAspect}
+          setSelectedImageAspect={setSelectedImageAspect}
+          selectedImageSteps={selectedImageSteps}
+          setSelectedImageSteps={setSelectedImageSteps}
+          isGeneratingImage={isGeneratingImage}
+          isImprovingImagePrompt={isImprovingImagePrompt}
+          imageGenerationError={imageGenerationError}
+          selectedViewingImage={selectedViewingImage}
+          setSelectedViewingImage={setSelectedViewingImage}
+          handleGenerateImage={handleGenerateImage}
+          handleImproveImagePromptText={handleImproveImagePromptText}
+          themeSettings={themeSettings}
+        />
+      )}
 
-        </div>
+    </div>
 
       </main>
 

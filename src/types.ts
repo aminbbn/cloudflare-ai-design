@@ -53,3 +53,24 @@ export interface ThemeSettings {
   fontSize: "sm" | "base" | "lg" | "xl";
   cardBlur: boolean;
 }
+
+export interface GeneratedImage {
+  id: string;
+  url: string;
+  prompt: string;
+  refinedPrompt: string;
+  model: string;
+  aspect: string;
+  steps: number;
+  createdAt: string;
+  seed: number;
+  width: number;
+  height: number;
+  telemetry?: {
+    inferenceTimeMs: number;
+    tokensUsed: number;
+    engine: string;
+    status: string;
+    nodeId: string;
+  };
+}
