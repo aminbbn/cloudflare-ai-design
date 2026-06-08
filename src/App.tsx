@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 import { 
   Cloud, 
   Plus, 
@@ -297,6 +297,21 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_CHATS;
   });
 
+  const seenMessageIds = useRef<Set<string>>(null!);
+  if (!seenMessageIds.current) {
+    const ids = new Set<string>();
+    const saved = localStorage.getItem("cf_ai_chats");
+    const parsed: Chat[] = saved ? JSON.parse(saved) : INITIAL_CHATS;
+    parsed.forEach(c => {
+      if (c && c.messages) {
+        c.messages.forEach(m => {
+          ids.add(m.id);
+        });
+      }
+    });
+    seenMessageIds.current = ids;
+  }
+
   const [projects, setProjects] = useState<Project[]>(() => {
     const saved = localStorage.getItem("cf_ai_projects");
     return saved ? JSON.parse(saved) : DEFAULT_PROJECTS;
@@ -372,6 +387,77 @@ export default function App() {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Custom menu popovers states and refs
+  const [showProjDropdown, setShowProjDropdown] = useState(false);
+  const [showPromptDropdown, setShowPromptDropdown] = useState(false);
+  const projDropdownRef = useRef<HTMLDivElement>(null);
+  const promptDropdownRef = useRef<HTMLDivElement>(null);
+
+  // States for creating custom system prompts
+  const [showAddPromptForm, setShowAddPromptForm] = useState(false);
+  const [newPromptLabel, setNewPromptLabel] = useState("");
+  const [newPromptText, setNewPromptText] = useState("");
+  const [isImprovingCustomPrompt, setIsImprovingCustomPrompt] = useState(false);
+
+  const handleImproveCustomPrompt = async () => {
+    if (!newPromptText.trim() || isImprovingCustomPrompt) return;
+    setIsImprovingCustomPrompt(true);
+    try {
+      const response = await fetch("/api/improve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: newPromptText
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to improve prompt.");
+      }
+
+      const data = await response.json();
+      const improvedText = data.text || newPromptText;
+      setNewPromptText(improvedText);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsImprovingCustomPrompt(false);
+    }
+  };
+
+  const handleCreatePrompt = () => {
+    if (!newPromptLabel.trim() || !newPromptText.trim()) return;
+    const newId = `prompt_${Date.now()}`;
+    const newPrompt: SystemPrompt = {
+      id: newId,
+      label: newPromptLabel.trim(),
+      prompt: newPromptText.trim()
+    };
+    setSystemPrompts(prev => [...prev, newPrompt]);
+    setActivePromptId(newId);
+    setNewPromptLabel("");
+    setNewPromptText("");
+    setShowAddPromptForm(false);
+  };
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (projDropdownRef.current && !projDropdownRef.current.contains(event.target as Node)) {
+        setShowProjDropdown(false);
+      }
+      if (promptDropdownRef.current && !promptDropdownRef.current.contains(event.target as Node)) {
+        setShowPromptDropdown(false);
+        setShowAddPromptForm(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   // --- Persistence Synchronizer ---
   useEffect(() => {
@@ -939,7 +1025,7 @@ export default function App() {
       <main className="absolute inset-3 md:inset-6 lg:inset-8 z-10 flex gap-4 md:gap-6 overflow-hidden">
         
         {/* --- LEFT SIDEBAR (Inspired by Zyricon/Synapse style) --- */}
-        <aside className={`w-72 flex-shrink-0 flex flex-col border rounded-[2rem] p-5 relative overflow-hidden transition-all ${
+        <aside className={`w-72 flex-shrink-0 flex flex-col border rounded-2xl p-5 relative overflow-hidden transition-all ${
           themeSettings.mode === "light" 
             ? "bg-[#fafafa] border-zinc-200/80 text-zinc-800 shadow-[0_6px_25px_rgba(0,0,0,0.02)]" 
             : "bg-[#0a0a0c]/90 border-[#1f1f23] text-zinc-100"
@@ -1257,7 +1343,7 @@ export default function App() {
         </aside>
 
         {/* --- CORE WORKSPACE WINDOW --- */}
-        <div className={`flex-1 flex flex-col border rounded-[2rem] overflow-hidden relative ${
+        <div className={`flex-1 flex flex-col border rounded-2xl overflow-hidden relative ${
           themeSettings.mode === "light"
             ? "bg-[#ffffff] border-zinc-200/80 shadow-[0_6px_25px_rgba(0,0,0,0.02)]"
             : "bg-[#0a0a0c]/85 border-[#1f1f23]"
@@ -1271,109 +1357,345 @@ export default function App() {
           }`}>
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {activeChat ? (
-                <>
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    {/* Editable title on click */}
-                    {isRenamingChat ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={renameText}
-                          onChange={(e) => setRenameText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleRenameChat();
-                          }}
-                          className="px-2 py-1 bg-zinc-950 border border-white/10 rounded text-xs text-white focus:outline-none"
-                          autoFocus
-                        />
-                        <button 
-                          onClick={handleRenameChat}
-                          className="p-1 rounded hover:bg-white/5 text-emerald-400 cursor-pointer"
-                        >
-                          <Check size={14} />
-                        </button>
-                        <button 
-                          onClick={() => setIsRenamingChat(false)}
-                          className="p-1 rounded hover:bg-white/5 text-red-400 cursor-pointer"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <h2 
-                          onClick={() => {
-                            setIsRenamingChat(true);
-                            setRenameText(activeChat.title);
-                          }}
-                          className="text-sm font-bold text-white tracking-tight cursor-help hover:text-zinc-200 truncate"
-                          title="Click here to Rename"
-                        >
-                          {activeChat.title}
-                        </h2>
-                        <button 
-                          onClick={() => {
-                            setIsRenamingChat(true);
-                            setRenameText(activeChat.title);
-                          }}
-                          className="text-zinc-500 hover:text-white p-1 cursor-pointer"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Project allocation dropdown tag */}
-                  <div className={`hidden sm:flex items-center gap-1.5 ml-2 border-l pl-3 ${
-                    themeSettings.mode === "light" ? "border-zinc-200" : "border-white/5"
-                  }`}>
-                    <span className="text-[10px] text-zinc-500 font-semibold uppercase">Project:</span>
-                    <select
-                      value={activeChat.projectId || ""}
-                      onChange={(e) => handleAssignProjectToChat(activeChat.id, e.target.value || null)}
-                      className={`px-2.5 py-1 border rounded text-[10px] font-bold cursor-pointer focus:outline-none focus:border-orange-500 ${
-                        themeSettings.mode === "light"
-                          ? "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-                          : "bg-zinc-950 border-white/5 text-zinc-300 hover:bg-[#12141a]"
-                      }`}
-                    >
-                      <option value="">(None)</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.title}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {/* Editable title on click */}
+                  {isRenamingChat ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={renameText}
+                        onChange={(e) => setRenameText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleRenameChat();
+                        }}
+                        className="px-2 py-1 bg-zinc-950 border border-white/10 rounded text-xs text-white focus:outline-none"
+                        autoFocus
+                      />
+                      <button 
+                        onClick={handleRenameChat}
+                        className="p-1 rounded hover:bg-white/5 text-emerald-400 cursor-pointer"
+                      >
+                        <Check size={14} />
+                      </button>
+                      <button 
+                        onClick={() => setIsRenamingChat(false)}
+                        className="p-1 rounded hover:bg-white/5 text-red-400 cursor-pointer"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 
+                        onClick={() => {
+                          setIsRenamingChat(true);
+                          setRenameText(activeChat.title);
+                        }}
+                        className="text-sm font-bold text-white tracking-tight cursor-help hover:text-zinc-200 truncate"
+                        title="Click here to Rename"
+                      >
+                        {activeChat.title}
+                      </h2>
+                      <button 
+                        onClick={() => {
+                          setIsRenamingChat(true);
+                          setRenameText(activeChat.title);
+                        }}
+                        className="text-zinc-500 hover:text-white p-1 cursor-pointer"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </>
+                  )}
+                </div>
               ) : (
                 <div>
-                  <h2 className={`text-sm font-bold tracking-tight ${
-                    themeSettings.mode === "light" ? "text-zinc-950" : "text-white"
-                  }`}>Cloudflare AI Workspace</h2>
-                  <p className="text-[10px] text-zinc-500 font-sans">Choose or draft an optimization coordinate below</p>
+                   <h2 className={`text-sm font-bold tracking-tight ${
+                     themeSettings.mode === "light" ? "text-zinc-950" : "text-white"
+                   }`}>Cloudflare AI Workspace</h2>
+                   <p className="text-[10px] text-zinc-500 font-sans">Choose or draft an optimization coordinate below</p>
                 </div>
               )}
             </div>
 
-            {/* Right-aligned parameters */}
-            <div className="flex items-center gap-3">
-              {/* Active prompt indicator */}
-              <div className={`hidden md:flex items-center gap-1.5 py-1 px-2 rounded-xl text-[10px] border ${
-                themeSettings.mode === "light"
-                  ? "bg-zinc-50 border-zinc-200/80 text-zinc-700"
-                  : "bg-zinc-950/60 border-white/5 text-zinc-350"
-              }`}>
-                <span className="text-zinc-500 font-bold">PROMPT:</span>
-                <span className="font-semibold" style={{ color: themeSettings.accentColor }}>
-                  {systemPrompts.find(p => p.id === activePromptId)?.label || "Expert Mode"}
-                </span>
-              </div>
+            {/* Right-aligned parameters - beautifully spaced to avoid clustering */}
+            <div className="flex items-center gap-4">
+              {activeChat && (
+                <>
+                  {/* Custom Project Dropdown Popover */}
+                  {(() => {
+                    const activeProj = projects.find(p => p.id === activeChat.projectId);
+                    const projColor = activeProj ? activeProj.color : (themeSettings.mode === "light" ? "#71717a" : "#a1a1aa");
+                    return (
+                      <div ref={projDropdownRef} className="relative">
+                        <button
+                          onClick={() => setShowProjDropdown(!showProjDropdown)}
+                          className="relative flex items-center justify-center w-8 h-8 rounded-xl border transition-all duration-300 hover:scale-[1.05] active:scale-[0.95] cursor-pointer"
+                          style={{
+                            borderColor: activeProj ? `${activeProj.color}25` : (themeSettings.mode === "light" ? "#e4e4e7" : "#27272a"),
+                            backgroundColor: activeProj ? `${activeProj.color}08` : "transparent",
+                            color: projColor
+                          }}
+                          title={activeProj ? `Project: ${activeProj.title}` : "Assign Project"}
+                        >
+                          <Folder 
+                            size={16} 
+                            weight={activeProj ? "fill" : "regular"} 
+                            className="transition-transform duration-500 hover:rotate-12 hover:scale-110"
+                            style={{ color: projColor }}
+                          />
+                        </button>
 
-              {/* Connected node health lights */}
-              <span className="px-2.5 py-1 text-[10px] bg-emerald-500/10 border border-emerald-500/20 rounded font-bold font-mono text-emerald-400 flex items-center gap-1 animate-fade-in">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                ACTIVE CLOUD
-              </span>
+                        <AnimatePresence>
+                          {showProjDropdown && (
+                            <motion.div
+                              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                              transition={{ duration: 0.15, ease: "easeOut" }}
+                              className={`absolute right-0 mt-2 z-50 w-56 rounded-2xl border p-2 shadow-2xl backdrop-blur-md ${
+                                themeSettings.mode === "light"
+                                  ? "bg-white/95 border-zinc-200 text-zinc-800"
+                                  : "bg-zinc-900/95 border-[#1f1f23] text-zinc-200"
+                              }`}
+                            >
+                              <div className="px-2.5 py-1.5 text-[9px] font-mono tracking-wider text-zinc-500 uppercase">
+                                Assign Target Project
+                              </div>
+                              <div className="h-[1px] my-1 bg-zinc-200/50 dark:bg-white/5" />
+                              <div className="space-y-0.5 max-h-60 overflow-y-auto pr-1">
+                                <button
+                                  onClick={() => {
+                                    handleAssignProjectToChat(activeChat.id, null);
+                                    setShowProjDropdown(false);
+                                  }}
+                                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-left text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                    !activeChat.projectId
+                                      ? (themeSettings.mode === "light" ? "bg-zinc-100 text-zinc-950" : "bg-white/10 text-white")
+                                      : (themeSettings.mode === "light" ? "hover:bg-zinc-100 text-zinc-600" : "hover:bg-white/5 text-zinc-400")
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <Folder size={14} className="text-zinc-500" />
+                                    <span>(None / Sandbox)</span>
+                                  </span>
+                                  {!activeChat.projectId && <Check size={12} weight="bold" style={{ color: themeSettings.accentColor }} />}
+                                </button>
+
+                                {projects.map(p => {
+                                  const isSelected = activeChat.projectId === p.id;
+                                  return (
+                                    <button
+                                      key={p.id}
+                                      onClick={() => {
+                                        handleAssignProjectToChat(activeChat.id, p.id);
+                                        setShowProjDropdown(false);
+                                      }}
+                                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-left text-[10px] font-bold transition-all duration-200 cursor-pointer ${
+                                        isSelected
+                                          ? (themeSettings.mode === "light" ? "bg-zinc-100 text-zinc-950" : "bg-white/10 text-white")
+                                          : (themeSettings.mode === "light" ? "hover:bg-zinc-100 text-zinc-600" : "hover:bg-white/5 text-zinc-400")
+                                      }`}
+                                    >
+                                      <span className="flex items-center gap-1.5">
+                                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+                                        <span className="truncate">{p.title}</span>
+                                      </span>
+                                      {isSelected && <Check size={12} weight="bold" style={{ color: p.color }} />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })()}
+
+                  {/* System Prompt Dropdown Popover */}
+                  <div ref={promptDropdownRef} className="relative">
+                    <button
+                      onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                      className={`relative flex items-center justify-center w-8 h-8 rounded-xl border transition-all duration-300 hover:scale-[1.05] active:scale-[0.95] cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.02)] ${
+                        themeSettings.mode === "light"
+                          ? "bg-white border-zinc-200 text-zinc-700 hover:border-zinc-350"
+                          : "bg-zinc-900/40 border-white/5 text-zinc-300 hover:border-white/15"
+                      }`}
+                      title={`System Prompt: ${systemPrompts.find(p => p.id === activePromptId)?.label || "Expert Mode"}`}
+                    >
+                      <Terminal 
+                        size={16} 
+                        className="transition-all duration-500 hover:rotate-6 hover:scale-110 text-zinc-400" 
+                        style={{ color: themeSettings.accentColor }}
+                      />
+                    </button>
+
+                    <AnimatePresence>
+                      {showPromptDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: 8 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: 8 }}
+                          transition={{ duration: 0.2, ease: "easeOut" }}
+                          className={`absolute right-0 mt-2 z-50 rounded-2xl border p-3 shadow-2xl backdrop-blur-md transition-all duration-300 ${
+                            showAddPromptForm ? "w-80 sm:w-[460px]" : "w-64"
+                          } ${
+                            themeSettings.mode === "light"
+                              ? "bg-white/95 border-zinc-200 text-zinc-800"
+                              : "bg-zinc-900/95 border-[#1f1f23] text-zinc-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between px-1.5 py-1">
+                            <div className="text-[9px] font-mono tracking-wider text-zinc-500 uppercase">
+                              {showAddPromptForm ? "Create Custom System Prompt" : "AI Expert System Prompts"}
+                            </div>
+                            {!showAddPromptForm && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowAddPromptForm(true);
+                                }}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-[9px] text-emerald-400 font-bold transition-all border border-emerald-500/20 active:scale-95 cursor-pointer"
+                                title="Define a custom system prompt"
+                              >
+                                <Plus size={10} weight="bold" />
+                                <span>New</span>
+                              </button>
+                            )}
+                          </div>
+                          <div className="h-[1px] my-1.5 bg-zinc-200/50 dark:bg-white/5" />
+                          
+                          {showAddPromptForm ? (
+                            <div className="p-1 space-y-3.5">
+                              <div className="space-y-1">
+                                <label className="block text-[9px] font-mono tracking-wider text-zinc-500 uppercase">Prompt Label</label>
+                                <input
+                                  type="text"
+                                  value={newPromptLabel}
+                                  onChange={(e) => setNewPromptLabel(e.target.value)}
+                                  placeholder="e.g. Edge Performance Optimizer"
+                                  className={`w-full px-3 py-2 rounded-xl text-[11px] font-bold outline-none border transition-all ${
+                                    themeSettings.mode === "light"
+                                      ? "bg-zinc-50 border-zinc-200 focus:border-zinc-350 focus:bg-white text-zinc-850"
+                                      : "bg-zinc-950/40 border-white/5 focus:border-white/15 focus:bg-zinc-950/60 text-white"
+                                  }`}
+                                  autoFocus
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="block text-[9px] font-mono tracking-wider text-zinc-500 uppercase">System Instructions</label>
+                                  
+                                  {/* Beautiful Spark-driven Improve with AI option */}
+                                  <button
+                                    type="button"
+                                    onClick={handleImproveCustomPrompt}
+                                    disabled={isImprovingCustomPrompt || !newPromptText.trim()}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border transition-all text-[9px] font-bold cursor-pointer active:scale-95 duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+                                      newPromptText.trim()
+                                        ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border-amber-500/25 hover:border-amber-500/40"
+                                        : "bg-zinc-500/5 text-zinc-500 border-transparent cursor-not-allowed opacity-55"
+                                    }`}
+                                    title="Use Gemini Client API to enrich and polish this prompt instructions template"
+                                  >
+                                    <Sparkle size={10} className={isImprovingCustomPrompt ? "animate-spin" : "transition-transform duration-300 hover:scale-[1.15]"} />
+                                    <span>{isImprovingCustomPrompt ? "AI Polishing..." : "Improve with AI"}</span>
+                                  </button>
+                                </div>
+                                <textarea
+                                  value={newPromptText}
+                                  onChange={(e) => setNewPromptText(e.target.value)}
+                                  rows={6}
+                                  placeholder="Describe roles, tasks, constraints, and preferred layout outputs here (e.g. 'You are an elite DNS performance consultant...')"
+                                  className={`w-full px-3 py-2 rounded-xl text-[11px] font-medium outline-none border transition-all resize-none scrollbar-none leading-relaxed ${
+                                    themeSettings.mode === "light"
+                                      ? "bg-zinc-50 border-zinc-200 focus:border-zinc-350 focus:bg-white text-zinc-800"
+                                      : "bg-zinc-950/40 border-white/5 focus:border-white/15 focus:bg-zinc-950/60 text-white"
+                                  }`}
+                                />
+                              </div>
+                              <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-zinc-200/50 dark:border-white/5">
+                                <button
+                                  onClick={() => {
+                                    setShowAddPromptForm(false);
+                                    setNewPromptLabel("");
+                                    setNewPromptText("");
+                                  }}
+                                  className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all active:scale-95 cursor-pointer ${
+                                    themeSettings.mode === "light"
+                                      ? "hover:bg-zinc-100 text-zinc-650"
+                                      : "hover:bg-white/5 text-zinc-400"
+                                  }`}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={handleCreatePrompt}
+                                  disabled={!newPromptLabel.trim() || !newPromptText.trim()}
+                                  className={`px-3.5 py-1.5 rounded-xl text-[10px] font-bold transition-all active:scale-[0.98] cursor-pointer flex items-center gap-1 ${
+                                    newPromptLabel.trim() && newPromptText.trim()
+                                      ? "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_2px_10px_rgba(16,185,129,0.08)]"
+                                      : "opacity-40 cursor-not-allowed bg-zinc-500/5 text-zinc-400 border border-transparent"
+                                  }`}
+                                >
+                                  <Check size={10} weight="bold" />
+                                  <span>Create Prompt</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1">
+                              {systemPrompts.map(p => {
+                                const isSelected = activePromptId === p.id;
+                                return (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => {
+                                      setActivePromptId(p.id);
+                                      setShowPromptDropdown(false);
+                                    }}
+                                    className={`w-full flex flex-col justify-start px-3 py-2 rounded-xl text-left transition-all duration-200 cursor-pointer ${
+                                      isSelected
+                                        ? (themeSettings.mode === "light" ? "bg-zinc-100 text-zinc-950" : "bg-white/10 text-white")
+                                        : (themeSettings.mode === "light" ? "hover:bg-zinc-50 text-zinc-650" : "hover:bg-white/5 text-zinc-400")
+                                    }`}
+                                  >
+                                    <div className="w-full flex items-center justify-between">
+                                      <span className="text-[10px] font-bold truncate">{p.label}</span>
+                                      {isSelected && <Check size={12} weight="bold" style={{ color: themeSettings.accentColor }} />}
+                                    </div>
+                                    <p className="text-[9px] mt-0.5 opacity-60 leading-normal line-clamp-2 font-normal">
+                                      {p.prompt}
+                                    </p>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </>
+              )}
+
+              {/* Connected node health lights with dynamic interactive status */}
+              <div 
+                className="group relative flex items-center justify-center w-8 h-8 rounded-xl border bg-emerald-500/5 border-emerald-500/15 text-emerald-400 transition-all duration-300 hover:bg-emerald-500/10 hover:border-emerald-500/35 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95 cursor-pointer"
+                title="Secure Link Connection Handshake Active"
+              >
+                <span className="absolute top-1 right-1 flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+                
+                <CloudCheck 
+                  size={16} 
+                  weight="fill"
+                  className="transition-transform duration-500 group-hover:scale-110" 
+                />
+              </div>
             </div>
           </div>
 
@@ -1679,6 +2001,10 @@ export default function App() {
                   const isUser = m.role === "user";
                   const isEditing = editingMessageId === m.id;
                   const isLatest = idx === activeChat.messages.length - 1;
+                  const shouldAnimate = isLatest && !seenMessageIds.current.has(m.id);
+                  if (shouldAnimate) {
+                    seenMessageIds.current.add(m.id);
+                  }
 
                   return (
                     <div 
@@ -1699,9 +2025,9 @@ export default function App() {
                         </div>
                       )}
 
-                      <div className="max-w-[85%] min-w-0 space-y-1">
+                      <div className={`max-w-[85%] min-w-0 space-y-1 ${isUser ? "flex flex-col items-end" : ""}`}>
                         {/* Meta information */}
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider justify-start">
+                        <div className={`flex items-center gap-2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider ${isUser ? "justify-end" : "justify-start"}`}>
                           <span>{isUser ? "Local Operator" : getModelDisplayName(m.model, selectedModelId)}</span>
                           <span>•</span>
                           <span>{m.timestamp}</span>
@@ -1733,18 +2059,21 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
-                          <div className={`text-sm md:text-base leading-relaxed break-words font-medium ${isUser ? "text-white/80" : "text-zinc-200"}`}>
+                          <div 
+                            className={`text-sm md:text-base leading-relaxed break-words font-medium ${isUser ? "text-zinc-400" : "text-zinc-200"}`}
+                            style={isUser ? { color: "#a1a1aa" } : undefined}
+                          >
                             {isUser ? (
-                              <p className="whitespace-pre-wrap">{m.text}</p>
+                              <p className="whitespace-pre-wrap text-zinc-400" style={{ color: "#a1a1aa" }}>{m.text}</p>
                             ) : (
-                              renderMarkdownText(m.text, isLatest)
+                              renderMarkdownText(m.text, shouldAnimate)
                             )}
                           </div>
                         )}
 
                         {/* Individual action bar */}
                         {!isEditing && (
-                          <div className="flex items-center gap-3.5 pt-1 text-[11px] text-zinc-500 justify-start">
+                          <div className={`flex items-center gap-3.5 pt-1 text-[11px] text-zinc-500 ${isUser ? "justify-end" : "justify-start"}`}>
                             {isUser && (
                               <button
                                 onClick={() => handleStartEditMessage(m.id, m.text)}
